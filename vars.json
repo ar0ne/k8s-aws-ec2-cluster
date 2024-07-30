@@ -6,9 +6,5 @@
   {
     "ParameterKey": "KeyPair",
     "ParameterValue": "ec2testkeypair"
-  },
-  {
-    "ParameterKey": "K8sInstallUserData",
-    "ParameterValue": "cat containerd-install.sh; cat k8s-install.sh"
   }
 ]
