@@ -160,7 +160,15 @@ Resources:
         - IpProtocol: tcp
           FromPort: 2379
           ToPort: 2380
-          CidrIp: !Ref VPCCIDR 
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 6783
+          ToPort: 6783
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 6783
+          ToPort: 6784
+          CidrIp: !Ref VPCCIDR
       VpcId: !Ref VPC01
 
   WorkersSG:
@@ -181,6 +189,14 @@ Resources:
           FromPort: 10250
           ToPort: 10250
           CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 6783
+          ToPort: 6783
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 6783
+          ToPort: 6784
+          CidrIp: !Ref VPCCIDR
       VpcId: !Ref VPC01
 
   Server:
@@ -195,6 +211,15 @@ Resources:
       Tags:
         - Key: Name
           Value: server
+      UserData:
+        Fn::Base64:
+          !Sub
+          - |
+            #!/bin/bash
+            yum update -y
+            
+            swapoff -a
+            hostnamectl set-hostname server
 
   Node0:
     Type: AWS::EC2::Instance
@@ -208,6 +233,15 @@ Resources:
       Tags:
         - Key: Name
           Value: node-0
+      UserData:
+        Fn::Base64:
+          !Sub
+          - |
+            #!/bin/bash
+            yum update -y
+            
+            swapoff -a
+            hostnamectl set-hostname node-0
 
   Node1:
     Type: AWS::EC2::Instance
@@ -221,6 +255,16 @@ Resources:
       Tags:
         - Key: Name
           Value: node-1 
+      UserData:
+        Fn::Base64:
+          !Sub
+          - |
+            #!/bin/bash
+            yum update -y
+            
+            swapoff -a
+
+            hostnamectl set-hostname node-1
 
   ServerEIP:
     Type: AWS::EC2::EIP
@@ -240,8 +284,16 @@ Resources:
       Domain: vpc
       InstanceId: !Ref Node1
 
-# Outputs:
-#   ServerPublicIP:
-#     Description: Server ec2 instance public IP
-#     Value: !GetAtt ServerEIP.PublicIP
-
+Outputs:
+  ServerEC2InstancePublicIP:
+    Export:
+      Name: server
+    Value: !GetAtt Server.PublicIp
+  Node0EC2InstancePublicIP:
+    Export:
+      Name: node-0
+    Value: !GetAtt Node0.PublicIp
+  Node1EC2InstancePublicIP:
+    Export:
+      Name: node-1
+    Value: !GetAtt Node1.PublicIp
