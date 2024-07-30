@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: This template creates VPC and 3 EC2 instances (for k8s control plane and two nodes) 
+
+# METADATA
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Compute configuration"
+        Parameters:
+          - EC2InstanceType
+          - EC2AMID
+          - KeyPair
+      -
+        Label:
+          default: "Network configuration"
+        Parameters:
+          - VPCCIDR
+
+
+# PARAMETERS
+Parameters:
+
+  VPCCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: Enter CIDR for VPC. 10.0.0.0/16 by default.
+
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.nano
+    Description: Enter t2.micro or t2.nano. Default is t2.micro.
+
+  EC2AMID:
+    Type: String
+    Description: Enter actual Ubuntu AMI or something else.
+
+  KeyPair:
+    Description: Select the KeyPair that you would like to use for the ECS cluster hosts
+    Type: AWS::EC2::KeyPair::KeyName
+
+
+# RESOURCES 
+Resources:
+  VPC01:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock: 10.0.1.0/24
+      VpcId: !Ref VPC01  
+  
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1b
+      CidrBlock: 10.0.2.0/24
+      VpcId: !Ref VPC01 
+  
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1b
+      CidrBlock: 10.0.3.0/24
+      VpcId: !Ref VPC01 
+
+  IG01:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref IG01
+      VpcId: !Ref VPC01
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC01
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IG01
+      RouteTableId: !Ref RouteTable
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref PublicSubnet3
+  NACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC01
+
+  NACLEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: false
+      NetworkAclId: !Ref NACL
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: 100
+
+  NACLExit:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: true
+      NetworkAclId: !Ref NACL
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: 100
+
+  ControlPlaneSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows k8s control plane ports and protocols.
+      GroupName: control-plane-sg
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 6443
+          ToPort: 6443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 10250
+          ToPort: 10259
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 2379
+          ToPort: 2380
+          CidrIp: !Ref VPCCIDR 
+      VpcId: !Ref VPC01
+
+  WorkersSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows k8s workers ports and protocols.
+      GroupName: workers-sg 
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 30000
+          ToPort: 32767
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 10250
+          ToPort: 10250
+          CidrIp: !Ref VPCCIDR
+      VpcId: !Ref VPC01
+
+  Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyPair
+      ImageId: !Ref EC2AMID
+      InstanceType: !Ref EC2InstanceType
+      SecurityGroupIds:
+        - !Ref ControlPlaneSG
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: server
+
+  Node0:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyPair
+      ImageId: !Ref EC2AMID
+      InstanceType: !Ref EC2InstanceType
+      SecurityGroupIds:
+        - !Ref WorkersSG
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: node-0
+
+  Node1:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyPair
+      ImageId: !Ref EC2AMID
+      InstanceType: !Ref EC2InstanceType
+      SecurityGroupIds:
+        - !Ref WorkersSG
+      SubnetId: !Ref PublicSubnet3
+      Tags:
+        - Key: Name
+          Value: node-1 
+
+  ServerEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Server 
+
+  Node0EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Node0 
+
+  Node1EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Node1
+
+# Outputs:
+#   ServerPublicIP:
+#     Description: Server ec2 instance public IP
+#     Value: !GetAtt ServerEIP.PublicIP
+
